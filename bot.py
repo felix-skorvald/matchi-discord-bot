@@ -13,6 +13,7 @@ import discord
 from dotenv import load_dotenv
 
 import matchi
+import ollama
 
 load_dotenv()
 TOKEN = os.environ["DISCORD_TOKEN"]
@@ -127,7 +128,14 @@ def _format_block(facility: matchi.Facility, on: date, slots: list[matchi.Slot])
     return "\n".join(lines)
 
 
-async def _lookup_one(query: str, on: date, time_filter: SlotFilter) -> str:
+USAGE = (
+    "Mention me with a club name, e.g. `@bot Högsbohöjds TK`.\n"
+    "Also supports: `imorgon`, `tisdag`, `2026-06-01`, "
+    "`efter 17`, `före 20`, and `, ` to list multiple clubs."
+)
+
+
+async def _lookup_one(query: str, on: date, time_filter: SlotFilter) -> tuple[bool, str]:
     matches = await asyncio.to_thread(matchi.find_facility, query, 3)
     if not matches or matches[0][1] < MIN_MATCH_SCORE:
         suggest = ""
@@ -135,30 +143,32 @@ async def _lookup_one(query: str, on: date, time_filter: SlotFilter) -> str:
             suggest = "\nDid you mean: " + ", ".join(
                 f"_{f.name}_ ({f.city})" for f, _ in matches
             )
-        return f"Couldn't find a club matching `{query}`.{suggest}"
+        return False, f"Couldn't find a club matching `{query}`.{suggest}"
 
     facility, score = matches[0]
     log.info("query=%r on=%s → %s (score=%d)", query, on, facility.name, score)
 
     slots = await asyncio.to_thread(matchi.get_tennis_slots, facility.id, on)
     slots = [s for s in slots if time_filter(s)]
-    return _format_block(facility, on, slots)
+    return True, _format_block(facility, on, slots)
 
 
 async def _handle_query(raw: str) -> str:
     if not raw:
-        return (
-            "Mention me with a club name, e.g. `@bot Högsbohöjds TK`.\n"
-            "Also supports: `imorgon`, `tisdag`, `2026-06-01`, "
-            "`efter 17`, `före 20`, and `, ` to list multiple clubs."
-        )
+        return USAGE
 
     clubs, on, time_filter = _parse_query(raw)
     if not clubs:
         return "I parsed your filters but didn't see a club name."
 
-    blocks = await asyncio.gather(*(_lookup_one(c, on, time_filter) for c in clubs))
-    return "\n\n".join(blocks)
+    results = await asyncio.gather(*(_lookup_one(c, on, time_filter) for c in clubs))
+    if any(matched for matched, _ in results):
+        return "\n\n".join(text for _, text in results)
+
+    # Nothing matched a club — this probably isn't a tennis query at all.
+    # Remind them how to ask for tennis times, then answer whatever they actually asked.
+    answer = await asyncio.to_thread(ollama.ask, raw)
+    return f"{USAGE}\n\n{answer}"
 
 
 @client.event

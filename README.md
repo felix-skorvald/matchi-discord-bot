@@ -25,6 +25,10 @@ Modifiers (any order, optional, Swedish or English):
 Weekday names resolve to the **next occurrence including today** (so `tisdag` on a
 Tuesday means today). Default date is today; default time filter is no filter.
 
+If a mention doesn't match any club, the bot assumes it's not a tennis question —
+it replies with the usage hint above, followed by an answer from a local Ollama
+model (see `ollama.py`).
+
 ## Setup
 
 1. Create a Discord bot at https://discord.com/developers/applications, enable the
@@ -44,6 +48,10 @@ Tuesday means today). Default date is today; default time filter is no filter.
    python bot.py
    ```
 
+4. (Optional) For the non-tennis fallback, have Ollama running and reachable, and
+   set `OLLAMA_HOST` / `OLLAMA_MODEL` in `.env` if they differ from the defaults
+   (`http://localhost:11434`, `gemma4:e2b`).
+
 ## How it works
 
 - `matchi.py` calls `POST /facilities/findFacilities` once (cached 12h), fuzzy-matches
@@ -51,7 +59,8 @@ Tuesday means today). Default date is today; default time filter is no filter.
   `GET /book/schedule?facilityId=…&sport=1` for both indoor and outdoor tennis.
 - `bot.py` listens for mentions, parses date / time filter / club list out of the
   text, runs the scraper concurrently for each club, and replies with slots grouped
-  by court.
+  by court. If no club matches, it falls back to `ollama.py`, which asks a local
+  Ollama model to answer the message directly.
 
 ## Notes
 
